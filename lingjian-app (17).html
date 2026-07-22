@@ -4820,18 +4820,39 @@ function breakdown(t){
 async function openSplit(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
   const ov=openOverlay(`<div class="grip"></div><h2>拆成可执行小步</h2>
-    <p class="desc">「${t.title}」有点大。我把它拆成几步，第一步只要 10 分钟 —— 起步的坎一过，后面就顺了。</p>
+    <p class="desc">「${t.title}」有点大。我把它拆成几步，第一步只要 10 分钟 —— 起步的坎一过，后面就顺了。<br><span class="muted" style="font-size:12px">每步都能改文字、点时长调整、删或加 —— 按你自己的情况来。</span></p>
     <div class="split-list" id="sp-list"><div class="parsing" style="padding:16px"><span class="spin"></span>正在拆解…</div></div>
-    <button class="btn btn--primary btn--block" style="margin-top:14px" id="sp-add" disabled>写入任务库…</button>
+    <button class="btn btn--line btn--block" id="sp-more" style="margin-top:8px;display:none">＋ 加一步</button>
+    <button class="btn btn--primary btn--block" style="margin-top:10px" id="sp-add" disabled>写入任务库…</button>
     <div class="hint-note" style="margin-top:10px">每步都以动词开头、结果可验收。先做，规模的事之后再说。</div>`);
   const ai=await aiDecompose(t.title,'steps');
-  const steps=ai||breakdown(t);   // 真 AI 优先;后端不可达/空 → 本地模板兜底
+  let steps=(ai||breakdown(t)).map(s=>({title:s.title||'', est:(typeof s.est==='number'&&s.est>0)?s.est:20}));   // 真 AI 优先;后端不可达/空 → 本地模板兜底
   const list=ov.querySelector('#sp-list'); if(!list) return;   // 用户可能已关掉浮层
-  list.innerHTML=steps.map((s,i)=>`<div class="split-step ${i===0?'ice':''}"><span class="ss-n">${i+1}</span><div class="ss-tx"><b>${s.title}</b><span>约 ${s.est} 分钟${i===0?' · 破冰任务':''}</span></div></div>`).join('');
-  const add=ov.querySelector('#sp-add'); add.disabled=false; add.textContent='写入任务库 · '+steps.length+' 步';
-  add.onclick=()=>{ const day=t.day||0;
-    steps.slice().reverse().forEach((s,i)=>state.tasks.unshift({id:'sp'+Date.now()+i,title:s.title,domain:t.domain,load:s.est>=30?'medium':'light',est:s.est,status:'pending',day,tags:[t.title.slice(0,6)]}));
-    closeOverlay(ov); toast('已拆成 '+steps.length+' 步 · 从第一步开始就好','spark'); refresh(); };
+  const ESTS=[10,15,20,30,45,60,90], addBtn=ov.querySelector('#sp-add');
+  function render(){
+    list.innerHTML=steps.map((s,i)=>`<div class="split-step ${i===0?'ice':''}">
+      <span class="ss-n">${i+1}</span>
+      <div class="ss-tx" style="flex:1;min-width:0">
+        <input class="sp-title" data-i="${i}" value="${(s.title||'').replace(/"/g,'&quot;')}" placeholder="第 ${i+1} 步…" autocomplete="off" style="width:100%;border:none;background:transparent;font:inherit;font-weight:600;color:inherit;outline:none;padding:0">
+        <span><button class="sp-est" data-i="${i}" style="border:none;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">约 ${s.est} 分钟</button>${i===0?' · 破冰任务':''}</span>
+      </div>
+      <button class="sp-del" data-i="${i}" title="删除这步" style="border:none;background:transparent;cursor:pointer;color:#c65a5a;padding:4px;align-self:center">${icon('close',14,2.4)}</button>
+    </div>`).join('');
+    list.querySelectorAll('.sp-title').forEach(inp=>inp.oninput=()=>{ steps[+inp.dataset.i].title=inp.value; });
+    list.querySelectorAll('.sp-est').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i, c=ESTS.indexOf(steps[i].est); steps[i].est=ESTS[(c+1)%ESTS.length]; render(); });
+    list.querySelectorAll('.sp-del').forEach(b=>b.onclick=()=>{ if(steps.length<=1){ toast('至少留一步','pen'); return; } steps.splice(+b.dataset.i,1); render(); });
+    addBtn.textContent='写入任务库 · '+steps.length+' 步';
+  }
+  render(); addBtn.disabled=false;
+  const more=ov.querySelector('#sp-more'); more.style.display='';
+  more.onclick=()=>{ steps.push({title:'', est:20}); render(); const ins=list.querySelectorAll('.sp-title'); if(ins.length) ins[ins.length-1].focus(); };
+  addBtn.onclick=()=>{
+    const clean=steps.map(s=>({title:(s.title||'').trim(), est:s.est})).filter(s=>s.title);
+    if(!clean.length){ toast('先给步骤填点内容','pen'); return; }
+    const day=t.day||0;
+    clean.slice().reverse().forEach((s,i)=>state.tasks.unshift({id:'sp'+Date.now()+i,title:s.title,domain:t.domain,load:s.est>=30?'medium':'light',est:s.est,status:'pending',day,tags:[t.title.slice(0,6)]}));
+    closeOverlay(ov); toast('已拆成 '+clean.length+' 步 · 从第一步开始就好','spark'); refresh();
+  };
 }
 function openFocus(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
