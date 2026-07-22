@@ -1,0 +1,17 @@
+# --- secrets: 绝不进 git(README §0/§10 安全红线) ---
+.env
+backend/.env
+*.key
+*.pem
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- node / capacitor(泳道3) ---
+node_modules/
+
+# --- os ---
+.DS_Store

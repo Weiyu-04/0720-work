@@ -1874,6 +1874,28 @@ const state = {
   state.tasks.splice(4,0,{id:'tddl', title:'把实验数据发给导师', domain:'work', load:'light', est:10, status:'pending', urgency:'high', day:0, ddl:{d:0,t:hh+':'+mm}, tags:['马上截止']});
 })();
 
+/* ============ 后端配置 & 本地持久化 —— 泳道1 (L1-2 API 地址 / L1-3 刷新不丢) ============ */
+// 后端地址(配置项,见 README §8):泳道3 打包成 app 时,改成你的 HTTPS 隧道 / 服务器地址即可。
+const LJ_API_BASE = 'http://127.0.0.1:8000';
+
+const LJ_STORE_KEY = 'lingjian_state_v1';
+function saveState(){ try{ localStorage.setItem(LJ_STORE_KEY, JSON.stringify(state)); }catch(e){} }
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LJ_STORE_KEY);
+    if(!raw) return;                          // 首次访问:用默认种子数据
+    Object.assign(state, JSON.parse(raw));    // 恢复上次保存:tasks/habits/flags 等整体覆盖默认
+    // 演示用的"3分钟后截止"任务:恢复后把倒计时刷新到当下,别显示成已过期
+    const td = (state.tasks||[]).find(t=>t.id==='tddl');
+    if(td){ const n=new Date(Date.now()+3*60000);
+      td.ddl={d:0, t:String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')}; }
+  }catch(e){ /* 存档损坏就退回默认,不阻断启动 */ }
+}
+loadState();
+setInterval(saveState, 2000);                                                            // 定时快照
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveState(); });  // 切后台即存
+window.addEventListener('beforeunload', saveState);                                       // 关闭/刷新前存
+
 /* ================= HELPERS ================= */
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
@@ -3538,10 +3560,30 @@ function openVoice(){
     ov2.querySelector('#pe-save').onclick=()=>{ it.title=ov2.querySelector('#pe-title').value.trim()||it.title; it.domain=nd; it.day=nday; it.time=ntime; it.est=nest; it.load=nest>=90?'deep':nest>=40?'medium':'light'; it.restorative=DOMAINS[nd].restorative; it.conf=Math.max(it.conf,90); closeOverlay(ov2); paint(); toast('这条改好了'); };
     ov2.querySelector('#pe-del').onclick=()=>{ curItems.splice(idx,1); closeOverlay(ov2); paint(); };
   }
-  function renderResult(text){
+  function aiBadgeHtml(online){
+    const base='display:inline-flex;align-items:center;gap:6px;font-size:11.5px;border-radius:999px;padding:3px 10px;margin:0 0 8px';
+    return online
+      ? `<div class="ai-badge" style="${base};color:#2e7d5b;background:#e7f5ee;border:1px solid #bfe6d2">● AI 在线 · 后端实时解析</div>`
+      : `<div class="ai-badge" style="${base};color:#9a6b3f;background:#fbf0e4;border:1px solid #e7d3b8">○ 离线示例 · 本地兜底</div>`;
+  }
+  async function renderResult(text){
     tr.textContent=text;
     res.innerHTML=`<div class="parsing" style="padding:18px"><span class="spin"></span>切分事件 · 归类领域 · 估算时长…</div>`;
-    setTimeout(()=>{ curItems=parseUtterance(text); if(!curItems.length){ res.innerHTML='<div class="hint-note">没太听清，换个说法再试试？</div>'; return; } paint(); }, 900);
+    let online=false;
+    try{
+      const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(), 8000);   // 8秒超时
+      const resp=await fetch(LJ_API_BASE+'/parse', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text}), signal:ctrl.signal});
+      clearTimeout(timer);
+      if(!resp.ok) throw new Error('status '+resp.status);
+      const data=await resp.json();
+      if(!Array.isArray(data) || !data.length) throw new Error('empty');
+      curItems=data; online=true;                     // 后端在 → 用真结果
+    }catch(e){
+      curItems=parseUtterance(text); online=false;    // 后端挂/超时/没网/空结果 → 回退本地,永不白屏
+    }
+    if(!curItems.length){ res.innerHTML='<div class="hint-note">没太听清，换个说法再试试？</div>'; return; }
+    paint();
+    res.insertAdjacentHTML('afterbegin', aiBadgeHtml(online));   // 顶部挂"AI在线/离线"徽章
   }
   function showSRHelp(kind){
     const isFile = location.protocol==='file:';
