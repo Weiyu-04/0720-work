@@ -1,4 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2
-openai>=1.0        # 泳道2 接 DeepSeek 时才真正用到(v4-flash 走 OpenAI 兼容接口)
+openai>=1.0        # 真调 DeepSeek(v4-flash 走 OpenAI 兼容接口)
+python-dotenv>=1.0 # 自动从 backend/.env 读 DEEPSEEK_API_KEY

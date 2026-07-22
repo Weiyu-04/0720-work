@@ -35,9 +35,29 @@ python3 -m http.server 8080
 说一句话后,结果顶部会出现徽章:**绿色"● AI 在线"= 走了后端**;
 **琥珀"○ 离线示例"= 后端不可达、回退了本地兜底**(把后端停掉即可复现)。
 
-## 泳道2:接真 DeepSeek(拿到 key 之后)
+## 泳道2:接真 DeepSeek(拿到 key 之后)—— 代码已就位,只需放 key
 
-1. `cp .env.example .env`,填入 `DEEPSEEK_API_KEY`。⚠️ `.env` 已被根 `.gitignore` 忽略,**绝不提交**。
-2. `main.py` 里 `/parse` 把 `fake_parse(req.text)` 换成 `real_parse(req.text)`,
-   并按根 README §8 补全 system 提示词 + 注入服务器当前时间 + JSON 模式 + 空返回重试。
-3. **前端一个字都不用改** —— 返回字段形状与假后端完全一致。
+`real_parse()` 已按 §8 写好(system 提示词 + 注入服务器时间 + JSON 模式 + 空返回重试 + 后端校验)。
+`/parse` 会**自动判断**:环境里有 `DEEPSEEK_API_KEY` 就走真调,没有就走假后端。所以你要做的只有:
+
+```bash
+cd backend
+cp .env.example .env          # 然后编辑 .env,把 DEEPSEEK_API_KEY 填成你的真 key
+# ⚠️ .env 已被根 .gitignore 忽略,绝不提交、绝不发聊天、绝不进 apk
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+**怎么确认真调生效**:
+```bash
+curl http://localhost:8000/health
+#  {"ok":true,"mode":"live","model":"deepseek-v4-flash"}   ← mode=live 就是走真调了(fake=还没读到 key)
+```
+再喂一句**跟示例不同的**话,看是否真解析了你说的内容(假后端只会永远返回那 3 条):
+```bash
+curl -X POST http://localhost:8000/parse -H 'Content-Type: application/json' \
+  -d '{"text":"后天下午两点交课程作业，今晚十点前给导师回邮件"}'
+```
+前端里说/打这句话,顶部徽章应是绿色 **"● AI 在线 · 后端实时解析"**,且卡片内容就是你说的那两件事。
+
+**前端一个字都不用改** —— 返回字段形状与假后端完全一致。若真调偶发失败,`/parse` 返回空数组,前端会自动回退本地兜底(琥珀"离线"徽章),不白屏。
