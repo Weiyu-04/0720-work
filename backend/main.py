@@ -314,3 +314,46 @@ def chat(req: ChatReq):
         return {"crisis": True, "reply": ""}
     reply = _chat_real(req.text, req.history) if _has_key() else ""
     return {"crisis": False, "reply": reply}          # reply 为空时前端回退本地 BOT_REPLIES
+
+
+# ---------------------------------------------------------------------------
+# L2-5:洞察归因文案 /insights(数字由前端算法算好传入,文案由 AI 写;无 key/失败 → 前端保留写死默认)
+# ---------------------------------------------------------------------------
+class InsightReq(BaseModel):
+    stats: dict
+
+
+def _insights_system() -> str:
+    return (
+        "你是灵笺的心理·效率洞察分析师。根据给你的本周真实数据(JSON),写一段温柔而有洞察的归因分析。只输出 json。\n"
+        "要点:先看见状态、不审判自己;要用到数据里的具体数字;可以做有洞察的归因(如把拖延归到焦虑、把疲惫归到没休息够),但别编造数据里没有的结论。\n"
+        "输出一个对象 {\"headline\":\"一句话核心洞察\",\"analysis\":[\"1-2 段解读,每段是一个字符串\"],\"suggestions\":[\"给下周的第1条具体可执行建议\",\"第2条\"]}。\n"
+        "示例:{\"headline\":\"你的疲惫,更多来自没休息够,而不是不够努力\",\"analysis\":[\"本周恢复性活动只占 8%,而平均压力到了 78…\"],\"suggestions\":[\"下午高压时段只排轻量事务\",\"每周锁定两次 30 分钟运动、不可移动\"]}"
+    )
+
+
+def _insights_real(stats):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    for _ in range(2):
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL, response_format={"type": "json_object"},
+                messages=[{"role": "system", "content": _insights_system()},
+                          {"role": "user", "content": json.dumps(stats, ensure_ascii=False)}],
+                temperature=0.6)
+            d = json.loads(resp.choices[0].message.content or "{}")
+            head = str(d.get("headline") or "").strip()
+            analysis = [str(x).strip() for x in (d.get("analysis") or []) if str(x).strip()]
+            sug = [str(x).strip() for x in (d.get("suggestions") or []) if str(x).strip()]
+            if head and analysis:
+                return {"headline": head, "analysis": analysis, "suggestions": sug}
+        except Exception as e:
+            print("insights error:", e)
+    return None
+
+
+@app.post("/insights")
+def insights(req: InsightReq):
+    r = _insights_real(req.stats) if _has_key() else None
+    return r or {}   # 空对象时前端保留写死默认文案

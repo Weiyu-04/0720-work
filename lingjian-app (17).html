@@ -1908,6 +1908,43 @@ async function aiDecompose(title, mode){
   }catch(e){ return null; }
 }
 
+// L2-5 洞察归因:把算法算出的本周真实数字发给后端 /insights,AI 写归因分析+建议;失败保留写死默认
+let _aiInsight=null;
+function computeWeekStats(){
+  const w=state.week||{}, mins=w.minutes||{};
+  const tot=Object.values(mins).reduce((a,b)=>a+b,0)||1;
+  const top=Object.entries(mins).sort((a,b)=>b[1]-a[1])[0]||['work',0];
+  const at=w.anxietyTrend||[], rr=w.restRatioTrend||[];
+  const byH={}; (state.focusLog||[]).forEach(f=>{ (byH[f.h]=byH[f.h]||[]).push(f.eff); });
+  let bH=null,bE=-1; Object.entries(byH).forEach(([h,es])=>{ const a=es.reduce((x,y)=>x+y,0)/es.length; if(a>bE){bE=a;bH=+h;} });
+  return { 平均压力:w.avgStress, 恢复性占比百分比:rr.length?rr[rr.length-1]:null,
+    焦虑起:at[0], 焦虑终:at[at.length-1], 焦虑是否上升:at.length>1&&at[at.length-1]>at[0],
+    时间最多领域:(DOMAINS[top[0]]?DOMAINS[top[0]].label:top[0]), 该领域时间占比百分比:Math.round(top[1]/tot*100),
+    黄金时段起点小时:bH, 黄金时段效率星:bE>0?+bE.toFixed(1):null, 本周透支点:w.overdraft };
+}
+function _escIns(s){ return String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function applyInsight(ai){
+  const h=document.getElementById('ins-head'), b=document.getElementById('ins-body'),
+        s=document.getElementById('ins-sug'), lead=document.getElementById('ins-lead');
+  if(!h||!b) return;
+  h.innerHTML=_escIns(ai.headline);
+  b.innerHTML=(ai.analysis||[]).map(p=>`<p>${_escIns(p)}</p>`).join('');
+  if(s && (ai.suggestions||[]).length) s.innerHTML=(ai.suggestions||[]).map((x,i)=>`${i+1} · ${_escIns(x)}`).join('<br>');
+  if(lead) lead.innerHTML=`${icon('spark',14,2)} AI 实时归因分析`;
+}
+async function refreshInsight(){
+  if(!document.getElementById('ins-head')) return;      // 不在洞察页
+  if(_aiInsight){ applyInsight(_aiInsight); return; }     // 已有缓存,直接用
+  try{
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),12000);
+    const resp=await fetch(LJ_API_BASE+'/insights',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stats:computeWeekStats()}),signal:ctrl.signal});
+    clearTimeout(timer);
+    if(!resp.ok) return;
+    const d=await resp.json();
+    if(d && d.headline && (d.analysis||[]).length){ _aiInsight=d; applyInsight(d); }
+  }catch(e){}
+}
+
 /* ================= HELPERS ================= */
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
@@ -3229,18 +3266,20 @@ function RenderInsights(){
 
     <div class="sec-head"><h3>本周核心洞察</h3><span class="muted" style="font-size:12px">数据 · 归因 · 建议</span></div>
     <div class="insight">
-      <div class="lead">${icon('gauge',14,2)} 交叉归因分析</div>
-      <h4>你的拖延，<em>不是因为懒，是焦虑</em>。</h4>
+      <div class="lead" id="ins-lead">${icon('gauge',14,2)} 交叉归因分析</div>
+      <h4 id="ins-head">你的拖延，<em>不是因为懒，是焦虑</em>。</h4>
       <div class="stat">
-        <div class="b"><div class="v">78</div><div class="l">平均压力值</div></div>
+        <div class="b"><div class="v">${state.week.avgStress}</div><div class="l">平均压力值</div></div>
         <div class="b"><div class="v">12→56<span style="font-size:11px">%</span></div><div class="l">压力>70 拖延率</div></div>
         <div class="b"><div class="v">16:00</div><div class="l">高发时段起点</div></div>
       </div>
+      <div id="ins-body">
       <p>压力值一旦超过 70，你的拖延率就从 12% 骤增到 56%，且几乎都在下午四点后。这是高焦虑导致的决策瘫痪，与意志力无关。</p>
       <p>再往前看一周：上周恢复性占比只有 8%，滞后相关显示 <b>这周的高压，有一部分是上周没休息欠下的账</b>。</p>
+      </div>
       <div class="hairline"></div>
       <b style="font-size:13.5px">给下周的两条建议</b>
-      <p style="margin-top:8px">1 · 下午四点后只排轻量事务，把写作前移到 9–11 点（你该时段效率 4.6★，全天最高）。<br>2 · 预留两次各 30 分钟运动，锁定为不可移动。</p>
+      <p id="ins-sug" style="margin-top:8px">1 · 下午四点后只排轻量事务，把写作前移到 9–11 点（你该时段效率 4.6★，全天最高）。<br>2 · 预留两次各 30 分钟运动，锁定为不可移动。</p>
       <button class="btn btn--primary btn--block" style="margin-top:12px" data-applyplan>${icon('check',18,2.4)} 按这两条帮我重排下周</button>
     </div>
 
@@ -3264,6 +3303,7 @@ function RenderInsights(){
       ${mrow('restart','#8a978f','重新观看新手引导','再体验一次开箱流程','onboard')}
     </div>
     <div style="height:8px"></div>`;
+  refreshInsight();   // L2-5:渲染后异步拉 AI 归因文案填充(有缓存直接用,失败保留写死默认)
 }
 function mrow(ic,color,title,sub,action){
   return `<div class="mrow" data-open="${action}"><div class="ic" style="background:${color}">${icon(ic,20,2)}</div>
