@@ -1896,6 +1896,18 @@ setInterval(saveState, 2000);                                                   
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveState(); });  // 切后台即存
 window.addEventListener('beforeunload', saveState);                                       // 关闭/刷新前存
 
+// L2-2 任务拆解:调后端 /decompose;返回 [{title, est?}],后端不可达/空 → 返回 null(调用方回退本地模板)
+async function aiDecompose(title, mode){
+  try{
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(), 12000);
+    const resp=await fetch(LJ_API_BASE+'/decompose', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title, mode}), signal:ctrl.signal});
+    clearTimeout(timer);
+    if(!resp.ok) throw 0;
+    const data=await resp.json();
+    return (data && Array.isArray(data.steps) && data.steps.length) ? data.steps : null;
+  }catch(e){ return null; }
+}
+
 /* ================= HELPERS ================= */
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
@@ -3006,7 +3018,7 @@ function openChainBuilder(prefillGoal){
     box.querySelector('#cb-close').onclick=()=>closeOverlay(ov);
     box.querySelector('#cb-goal').oninput=e=>goal=e.target.value;
     box.querySelectorAll('#cb-dom [data-dk]').forEach(b=>b.onclick=()=>{ domain=b.dataset.dk; box.querySelectorAll('#cb-dom button').forEach(x=>x.classList.toggle('on',x===b)); });
-    box.querySelector('#cb-gen').onclick=()=>{ const g=(box.querySelector('#cb-goal').value||'').trim(); if(!g){ toast('先输入一个任务','pen'); return; } goal=g; if(domain==='work') domain=guessDomain(g); const raw=chainSteps(g); steps=raw.map((t,i)=>({title:t, est:i===0?20:i===raw.length-1?20:45, time:'', dayOff:0})); generated=true; paint(); };
+    box.querySelector('#cb-gen').onclick=async()=>{ const g=(box.querySelector('#cb-goal').value||'').trim(); if(!g){ toast('先输入一个任务','pen'); return; } goal=g; if(domain==='work') domain=guessDomain(g); const gb=box.querySelector('#cb-gen'); gb.disabled=true; gb.innerHTML='拆解中…'; const ai=await aiDecompose(g,'phases'); const raw=ai?ai.map(s=>s.title):chainSteps(g); steps=raw.map((t,i)=>({title:t, est:i===0?20:i===raw.length-1?20:45, time:'', dayOff:0})); generated=true; paint(); };
     if(generated){
       box.querySelectorAll('[data-si]').forEach(inp=>inp.oninput=e=>{ steps[+inp.dataset.si].title=e.target.value; });
       box.querySelectorAll('[data-sx]').forEach(b=>b.onclick=()=>{ saveInputs(); steps.splice(+b.dataset.sx,1); paint(); });
@@ -4805,15 +4817,19 @@ function breakdown(t){
   if(/复习|备考|背|考试|真题/.test(v)) return [{title:'先做 10 分钟、找回状态',est:10},{title:'完成核心章节的一半',est:30},{title:'整理错题与要点',est:20}];
   return [{title:'先做 10 分钟破冰，把这件事启动起来',est:10},{title:'完成主体的第一部分',est:25},{title:'收尾并检查一遍',est:20}];
 }
-function openSplit(id){
+async function openSplit(id){
   const t=state.tasks.find(x=>x.id===id); if(!t) return;
-  const steps=breakdown(t);
   const ov=openOverlay(`<div class="grip"></div><h2>拆成可执行小步</h2>
     <p class="desc">「${t.title}」有点大。我把它拆成几步，第一步只要 10 分钟 —— 起步的坎一过，后面就顺了。</p>
-    <div class="split-list">${steps.map((s,i)=>`<div class="split-step ${i===0?'ice':''}"><span class="ss-n">${i+1}</span><div class="ss-tx"><b>${s.title}</b><span>约 ${s.est} 分钟${i===0?' · 破冰任务':''}</span></div></div>`).join('')}</div>
-    <button class="btn btn--primary btn--block" style="margin-top:14px" id="sp-add">写入任务库 · ${steps.length} 步</button>
+    <div class="split-list" id="sp-list"><div class="parsing" style="padding:16px"><span class="spin"></span>正在拆解…</div></div>
+    <button class="btn btn--primary btn--block" style="margin-top:14px" id="sp-add" disabled>写入任务库…</button>
     <div class="hint-note" style="margin-top:10px">每步都以动词开头、结果可验收。先做，规模的事之后再说。</div>`);
-  ov.querySelector('#sp-add').onclick=()=>{ const day=t.day||0;
+  const ai=await aiDecompose(t.title,'steps');
+  const steps=ai||breakdown(t);   // 真 AI 优先;后端不可达/空 → 本地模板兜底
+  const list=ov.querySelector('#sp-list'); if(!list) return;   // 用户可能已关掉浮层
+  list.innerHTML=steps.map((s,i)=>`<div class="split-step ${i===0?'ice':''}"><span class="ss-n">${i+1}</span><div class="ss-tx"><b>${s.title}</b><span>约 ${s.est} 分钟${i===0?' · 破冰任务':''}</span></div></div>`).join('');
+  const add=ov.querySelector('#sp-add'); add.disabled=false; add.textContent='写入任务库 · '+steps.length+' 步';
+  add.onclick=()=>{ const day=t.day||0;
     steps.slice().reverse().forEach((s,i)=>state.tasks.unshift({id:'sp'+Date.now()+i,title:s.title,domain:t.domain,load:s.est>=30?'medium':'light',est:s.est,status:'pending',day,tags:[t.title.slice(0,6)]}));
     closeOverlay(ov); toast('已拆成 '+steps.length+' 步 · 从第一步开始就好','spark'); refresh(); };
 }

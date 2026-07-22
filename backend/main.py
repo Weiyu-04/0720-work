@@ -178,3 +178,79 @@ def validate(items):
 def parse(req: ParseReq):
     items = real_parse(req.text) if _has_key() else fake_parse(req.text)
     return validate(items)
+
+
+# ---------------------------------------------------------------------------
+# L2-2:任务拆解 /decompose(有 key 走真调;无 key/失败返回空 → 前端回退本地模板)
+# ---------------------------------------------------------------------------
+class DecomposeReq(BaseModel):
+    title: str
+    mode: str = "steps"   # steps=拆成可执行小步(带 est,第一步~10min 破冰) | phases=大目标拆成阶段
+
+
+def _decompose_system(mode: str) -> str:
+    if mode == "phases":
+        return (
+            "你是任务拆解助手,把用户的一个大目标拆成 5-8 个有先后顺序的阶段。只输出 json。\n"
+            "输出一个对象 {\"steps\":[{\"title\":\"阶段名\"}, ...]};title 简洁(不超过15字),按先后排列。\n"
+            "示例:{\"steps\":[{\"title\":\"确定选题与研究问题\"},{\"title\":\"完成文献综述\"}]}"
+        )
+    return (
+        "你是任务拆解助手,把用户的一件具体任务拆成 3-4 个可立刻执行的小步。只输出 json。\n"
+        "关键:第一步必须是最小、最易起步的\"破冰\"动作(est 约 10 分钟),帮用户跨过启动的坎;"
+        "每步以动词开头、结果可验收。\n"
+        "输出一个对象 {\"steps\":[{\"title\":\"步骤\",\"est\":分钟整数}, ...]},按执行顺序。\n"
+        "示例:{\"steps\":[{\"title\":\"打开文档,列出各小节标题\",\"est\":10},{\"title\":\"撰写正文第一部分\",\"est\":30},{\"title\":\"通读一遍、标出待补充\",\"est\":20}]}"
+    )
+
+
+def _norm_steps(steps, mode: str):
+    """规整拆解结果:兼容 [{title,est}] / [\"字符串\"];steps 模式保证 est 为正整数(第一步默认10)。"""
+    out = []
+    if not isinstance(steps, list):
+        return out
+    for i, s in enumerate(steps):
+        if isinstance(s, str):
+            s = {"title": s}
+        if not isinstance(s, dict):
+            continue
+        title = str(s.get("title") or "").strip()
+        if not title:
+            continue
+        item = {"title": title}
+        if mode != "phases":
+            est = s.get("est")
+            if not isinstance(est, int) or est <= 0:
+                est = 10 if i == 0 else 25    # 第一步破冰默认 10 分钟
+            item["est"] = est
+        out.append(item)
+    return out
+
+
+def _decompose_real(title: str, mode: str):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    system = _decompose_system(mode)
+    for _ in range(2):
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL,
+                response_format={"type": "json_object"},
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": title}],
+                temperature=0.3,
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            steps = data.get("steps") if isinstance(data, dict) else data
+            steps = _norm_steps(steps, mode)
+            if steps:
+                return steps
+        except Exception as e:
+            print("decompose error:", e)
+    return []
+
+
+@app.post("/decompose")
+def decompose(req: DecomposeReq):
+    steps = _decompose_real(req.title, req.mode) if _has_key() else []
+    return {"steps": steps}   # 空数组时前端回退本地模板
