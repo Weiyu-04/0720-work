@@ -357,3 +357,43 @@ def _insights_real(stats):
 def insights(req: InsightReq):
     r = _insights_real(req.stats) if _has_key() else None
     return r or {}   # 空对象时前端保留写死默认文案
+
+
+# ---------------------------------------------------------------------------
+# L2-4:意图补全 /suggest(把用户正在输入的任务名改写成更具体可执行的 2-3 个;无 key/失败 → 前端本地模板)
+# ---------------------------------------------------------------------------
+class SuggestReq(BaseModel):
+    text: str
+
+
+def _suggest_system() -> str:
+    return (
+        "你是任务输入助手。用户正在输入一个任务名(可能很简略),帮他改写成 2-3 个更具体、可立刻执行、结果可验收的任务名。只输出 json。\n"
+        "要求:保持用户原意;每个建议是一句简短任务名(不超过 20 字)、动词开头;不要解释。\n"
+        "输出对象 {\"suggestions\":[\"写法1\",\"写法2\",\"写法3\"]}。\n"
+        "示例:输入'写论文' → {\"suggestions\":[\"列出论文各小节标题,先起个头\",\"撰写实验分析,不少于800字\",\"通读全文、标出待补充的引用\"]}"
+    )
+
+
+def _suggest_real(text: str):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": _suggest_system()},
+                      {"role": "user", "content": text}],
+            temperature=0.5, max_tokens=200)
+        d = json.loads(resp.choices[0].message.content or "{}")
+        return [str(x).strip() for x in (d.get("suggestions") or []) if str(x).strip()][:3]
+    except Exception as e:
+        print("suggest error:", e)
+        return []
+
+
+@app.post("/suggest")
+def suggest(req: SuggestReq):
+    text = (req.text or "").strip()
+    if not text or not _has_key():
+        return {"suggestions": []}
+    return {"suggestions": _suggest_real(text)}

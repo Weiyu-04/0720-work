@@ -1908,6 +1908,18 @@ async function aiDecompose(title, mode){
   }catch(e){ return null; }
 }
 
+// L2-4 意图补全:把用户正在输入的任务名发给后端 /suggest,AI 改写成更具体的 2-3 个;失败返回 null(调用方回退本地模板)
+async function aiSuggest(text){
+  try{
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),8000);
+    const resp=await fetch(LJ_API_BASE+'/suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text}),signal:ctrl.signal});
+    clearTimeout(timer);
+    if(!resp.ok) return null;
+    const d=await resp.json();
+    return (d && Array.isArray(d.suggestions) && d.suggestions.length) ? d.suggestions.slice(0,3) : null;
+  }catch(e){ return null; }
+}
+
 // L2-5 洞察归因:把算法算出的本周真实数字发给后端 /insights,AI 写归因分析+建议;失败保留写死默认
 let _aiInsight=null;
 function computeWeekStats(){
@@ -3467,13 +3479,18 @@ function openAdd(prefill){
   drawTags();
 
   const titleEl=ov.querySelector('#a-title'), aihint=ov.querySelector('#a-aihint'), acBox=ov.querySelector('#a-ac');
-  let gt;
+  let gt, sugSeq=0;
+  const renderAC=(cands, ai)=>{
+    acBox.innerHTML = cands.length? `<div class="ac-tip">${icon('spark',12,2)} ${ai?'AI 帮你写得更具体（点击采用）':'试试更具体、可执行的写法（点击采用）'}</div>`+cands.map(c=>`<button class="ac-item" data-ac="${c.replace(/"/g,'&quot;')}">${c}</button>`).join('') : '';
+    acBox.querySelectorAll('[data-ac]').forEach(btn=>btn.onclick=()=>{ titleEl.value=btn.dataset.ac; d.title=btn.dataset.ac; acBox.innerHTML=''; if(d.autodom){ d.domain=guessDomain(d.title); setOn('a-dom','dk',d.domain); aihint.style.visibility='visible'; } updateSmart(); });
+  };
   titleEl.addEventListener('input',()=>{ d.title=titleEl.value; clearTimeout(gt); const v=titleEl.value.trim();
     if(v.length<1){ aihint.style.visibility='hidden'; acBox.innerHTML=''; return; }
-    const cands=suggestTasks(v);
-    acBox.innerHTML = cands.length? `<div class="ac-tip">${icon('spark',12,2)} 试试更具体、可执行的写法（点击采用）</div>`+cands.map(c=>`<button class="ac-item" data-ac="${c.replace(/"/g,'&quot;')}">${c}</button>`).join('') : '';
-    acBox.querySelectorAll('[data-ac]').forEach(btn=>btn.onclick=()=>{ titleEl.value=btn.dataset.ac; d.title=btn.dataset.ac; acBox.innerHTML=''; if(d.autodom){ d.domain=guessDomain(d.title); setOn('a-dom','dk',d.domain); aihint.style.visibility='visible'; } updateSmart(); });
-    gt=setTimeout(()=>{ if(v.length>=2 && d.autodom){ d.domain=guessDomain(v); setOn('a-dom','dk',d.domain); aihint.style.visibility='visible'; } updateSmart(); }, 420); });
+    renderAC(suggestTasks(v), false);                        // 立刻显示本地联想(零延迟)
+    const seq=++sugSeq;
+    gt=setTimeout(async()=>{ if(v.length>=2 && d.autodom){ d.domain=guessDomain(v); setOn('a-dom','dk',d.domain); aihint.style.visibility='visible'; } updateSmart();
+      if(v.length>=2){ const ai=await aiSuggest(v); if(ai && seq===sugSeq && titleEl.value.trim()===v) renderAC(ai, true); }  // 停顿后拉 AI 联想替换(校验序号+内容防过期覆盖)
+    }, 500); });
   ov.querySelector('#a-note').addEventListener('input',e=>{ d.note=e.target.value; });
 
   ov.querySelector('#a-close').onclick=()=>closeOverlay(ov);
