@@ -397,3 +397,51 @@ def suggest(req: SuggestReq):
     if not text or not _has_key():
         return {"suggestions": []}
     return {"suggestions": _suggest_real(text)}
+
+
+# ---------------------------------------------------------------------------
+# L2-5 延伸:双重报告文案 /report(输入某区间真实数字,输出效率摘要+心理摘要+归因+建议;无 key/失败 → 前端保留写死)
+# ---------------------------------------------------------------------------
+class ReportReq(BaseModel):
+    range: str = "week"
+    stats: dict
+
+
+def _report_system() -> str:
+    return (
+        "你是灵笺的双重报告撰写助手。根据给你的一段时间的真实数据(JSON),写这份报告的叙事文案。只输出 json。\n"
+        "输出一个对象:{\n"
+        " \"sumA\": \"效率报告(对外·可提交导师)的执行摘要,客观专业,2-4 句,要用到数据里的数字\",\n"
+        " \"sumB\": \"心理诊断(对内·仅本地)写给用户自己的话,温柔共情、不审判,2-4 句\",\n"
+        " \"attr\": [\"1-2 条核心归因,把现象与数据联系起来\"],\n"
+        " \"suggest\": [\"给下一阶段的第1条温柔建议\",\"第2条\"]}\n"
+        "别编造数据里没有的数字;sumA/sumB 可用少量 <b></b> 强调关键处。"
+    )
+
+
+def _report_real(rng, stats):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    payload = {"range": rng, "data": stats}
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": _report_system()},
+                      {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+            temperature=0.6, max_tokens=700)
+        d = json.loads(resp.choices[0].message.content or "{}")
+        sumA = str(d.get("sumA") or "").strip()
+        sumB = str(d.get("sumB") or "").strip()
+        attr = [str(x).strip() for x in (d.get("attr") or []) if str(x).strip()]
+        sug = [str(x).strip() for x in (d.get("suggest") or []) if str(x).strip()]
+        if sumA and sumB:
+            return {"sumA": sumA, "sumB": sumB, "attr": attr, "suggest": sug}
+    except Exception as e:
+        print("report error:", e)
+    return None
+
+
+@app.post("/report")
+def report(req: ReportReq):
+    r = _report_real(req.range, req.stats) if _has_key() else None
+    return r or {}

@@ -1920,6 +1920,18 @@ async function aiSuggest(text){
   }catch(e){ return null; }
 }
 
+// L2-5 延伸:双重报告文案。返回 {sumA,sumB,attr[],suggest[]};失败返回 null(调用方保留写死)
+async function aiReport(range, stats){
+  try{
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),12000);
+    const resp=await fetch(LJ_API_BASE+'/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({range,stats}),signal:ctrl.signal});
+    clearTimeout(timer);
+    if(!resp.ok) return null;
+    const d=await resp.json();
+    return (d && d.sumA && d.sumB) ? d : null;
+  }catch(e){ return null; }
+}
+
 // L2-5 洞察归因:把算法算出的本周真实数字发给后端 /insights,AI 写归因分析+建议;失败保留写死默认
 let _aiInsight=null;
 function computeWeekStats(){
@@ -4321,11 +4333,31 @@ function openReport(){
   </div>`, {full:true});
   const body=ov.querySelector('#rp-body'), pdf=ov.querySelector('#rp-pdf');
 
+  // L2-5:AI 报告文案(按区间缓存,有则用、无则异步拉、失败保留写死)
+  const _aiRep={}, _repLoading={};
+  const aiOr=(k,def)=> (_aiRep[range]&&_aiRep[range][k]) || def;
+  function reportStats(r){
+    const wm=r.minutes||{}, tot=Object.values(wm).reduce((a,b)=>a+b,0)||1;
+    const top=Object.entries(wm).sort((a,b)=>b[1]-a[1])[0]||['work',0]; const c=r.cards||[];
+    return { 区间:r.span||'自定义', 单位:r.unit, 计划完成率:c[0]&&c[0][0], 完成任务数:c[1]&&c[1][0],
+      深度工作:c[2]&&(c[2][0]+(c[2][1]||'')), 顺延次数:c[3]&&c[3][0],
+      平均压力:r.stress, 倦怠预警等级:r.zone, 心理韧性:r.resilience, 焦虑趋势:r.anx, 恢复性占比趋势:r.rest,
+      时间最多领域:(DOMAINS[top[0]]?DOMAINS[top[0]].label:top[0]), 该领域占比:Math.round(top[1]/tot*100),
+      项目:(r.projects||[]).map(p=>p[0]+' '+p[2]+'%'), 瓶颈:(r.bottleneck||[]).map(b=>b[1]) };
+  }
+  async function fetchReport(){
+    if(_aiRep[range]||_repLoading[range]) return;
+    _repLoading[range]=true;
+    const ai=await aiReport(range, reportStats(RANGE[range]));
+    _repLoading[range]=false;
+    if(ai && document.body.contains(ov)){ _aiRep[range]=ai; draw(); }   // 缓存 + 重绘
+  }
+
   const A=()=>{ const r=RANGE[range]; const wm=r.minutes; const barMax=Math.max(...Object.values(wm)); return `
     <div class="rep-week">${rangeLabel()} · ${PERSONAS[state.persona].label}</div>
     <div class="rep-summary">
-      <div class="rs-tag">${icon('spark',12,2)} ${r.unit}执行摘要</div>
-      <p>${r.sumA}</p>
+      <div class="rs-tag">${icon('spark',12,2)} ${r.unit}执行摘要${_aiRep[range]?' · AI 实时生成':''}</div>
+      <p>${aiOr('sumA',r.sumA)}</p>
     </div>
     <div class="rep-cards">
       ${r.cards.map(c=>`<div class="rc"><b>${c[0]}${c[1]?`<i>${c[1]}</i>`:''}</b><span>${c[2]}</span>${c[4]?`<em class="${c[3]}">${c[4]}</em>`:''}</div>`).join('')}
@@ -4354,8 +4386,8 @@ function openReport(){
     const rtMax=Math.max(...r.rest,15); return `
     <div class="rep-badges"><span class="rep-badge">${icon('lock',12,2)} 仅本地 · 不上传</span><span class="rep-badge">${icon('shield',12,2)} 非医疗诊断 · 仅供自我觉察</span></div>
     <div class="rep-summary warm">
-      <div class="rs-tag">${icon('heart',12,2)} 写给你自己</div>
-      <p>${r.sumB}</p>
+      <div class="rs-tag">${icon('heart',12,2)} 写给你自己${_aiRep[range]?' · AI 实时生成':''}</div>
+      <p>${aiOr('sumB',r.sumB)}</p>
     </div>
     <h4 class="rep-h">焦虑度变化 · ${r.unit}</h4>
     ${anxChart(r.anx, r.anxLabels)}
@@ -4374,9 +4406,9 @@ function openReport(){
     <h4 class="rep-h">${r.restTag}</h4>
     <div class="rt-bars">${r.rest.map((v,i)=>`<div class="rt"><div class="rt-bar" style="height:${v/rtMax*100}%;background:${i===r.rest.length-1?'#7fca8f':'#bfe3d6'}"></div><span>${v}%</span><small>${r.restLabels[i]}</small></div>`).join('')}</div>
     <h4 class="rep-h">核心归因</h4>
-    <div class="rep-attr">${r.attr.map((a,i)=>`<p${i?' style="margin-top:8px"':''}>${a}</p>`).join('')}</div>
+    <div class="rep-attr">${aiOr('attr',r.attr).map((a,i)=>`<p${i?' style="margin-top:8px"':''}>${a}</p>`).join('')}</div>
     <h4 class="rep-h">给${r.nextUnit}的温柔建议</h4>
-    ${r.suggest.map(s=>`<div class="rep-line"><div class="ck">${icon(s[0],12,2)}</div>${s[1]}</div>`).join('')}
+    ${((_aiRep[range]&&_aiRep[range].suggest)? _aiRep[range].suggest.map((t,i)=>[i%2?'heart':'clock',t]) : r.suggest).map(s=>`<div class="rep-line"><div class="ck">${icon(s[0],12,2)}</div>${s[1]}</div>`).join('')}
     <div class="rep-attr" style="margin-top:12px;background:#f4fbf8;border-color:#cdeee1"><p style="color:var(--brand-ink)">需要我按这些建议，直接帮你重排${r.nextUnit}日程吗？</p></div>`; };
 
   function draw(){
@@ -4387,6 +4419,7 @@ function openReport(){
     pdf.className='btn btn--block '+(tab==='a'?'btn--primary':'btn--line');
     const rl={week:'周报',month:'月报',year:'年报',custom:'报告'}[range];
     pdf.innerHTML = tab==='a'? icon('doc',18,2)+` 导出 PDF · ${rl}` : icon('lock',16,2)+' 心理页仅本地留存 · 不导出';
+    fetchReport();   // L2-5:异步拉 AI 报告文案,回来缓存并重绘(有缓存直接用,失败保留写死)
   }
   ov.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ tab=b.dataset.t; draw(); });
   ov.querySelectorAll('#rp-range button').forEach(b=>b.onclick=()=>{ const r=b.dataset.r;
