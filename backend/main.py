@@ -254,3 +254,63 @@ def _decompose_real(title: str, mode: str):
 def decompose(req: DecomposeReq):
     steps = _decompose_real(req.title, req.mode) if _has_key() else []
     return {"steps": steps}   # 空数组时前端回退本地模板
+
+
+# ---------------------------------------------------------------------------
+# L2-3:雷萌萌树洞对话 /chat(含危机词硬过滤;有 key 走真调,无 key/失败 → 前端本地兜底)
+# ⚠️ 安全:危机词命中时绝不把内容送进模型,直接让前端切到"严肃关怀模式"(热线)。
+# ---------------------------------------------------------------------------
+CRISIS_WORDS = ["不想活", "活不下去", "结束一切", "自杀", "自残", "伤害自己", "撑不下去了",
+                "没有意义", "消失算了", "想死", "轻生", "跳楼", "不想醒来"]
+
+
+class ChatMsg(BaseModel):
+    role: str        # user | assistant
+    content: str
+
+
+class ChatReq(BaseModel):
+    text: str
+    history: list[ChatMsg] = []
+
+
+def _looks_crisis(text: str) -> bool:
+    return any(w in (text or "") for w in CRISIS_WORDS)
+
+
+def _chat_system() -> str:
+    return (
+        "你是「雷萌萌」,灵笺 app 里一只治愈系的小陪伴。用户来这个'树洞'是想倾诉、被接住,不是来听道理的。\n"
+        "怎么回:\n"
+        "- 先共情、不说教:先接住情绪,别急着给建议或讲大道理。\n"
+        "- 温柔、口语、简短:像朋友一样,1-3 句话就好,别长篇。\n"
+        "- 具体不敷衍:回应对方说的具体内容,别只会'加油'。\n"
+        "- 可以偶尔轻轻提一个极小的行动(如'只做十分钟就好'),但绝不强迫、绝不评判、绝不施压。\n"
+        "- 用'萌萌'自称,语气软一点、暖一点。\n"
+        "只输出你要说的话本身,不要 json、不要加引号。"
+    )
+
+
+def _chat_real(text: str, history):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    msgs = [{"role": "system", "content": _chat_system()}]
+    for m in (history or [])[-6:]:              # 只带最近几轮,省 token
+        if m.role in ("user", "assistant") and m.content:
+            msgs.append({"role": m.role, "content": m.content})
+    msgs.append({"role": "user", "content": text})
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL, messages=msgs, temperature=0.8, max_tokens=220)
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        print("chat error:", e)
+        return ""
+
+
+@app.post("/chat")
+def chat(req: ChatReq):
+    if _looks_crisis(req.text):                       # 安全第一:危机词命中 → 绝不进模型
+        return {"crisis": True, "reply": ""}
+    reply = _chat_real(req.text, req.history) if _has_key() else ""
+    return {"crisis": False, "reply": reply}          # reply 为空时前端回退本地 BOT_REPLIES
