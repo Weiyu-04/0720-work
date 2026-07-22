@@ -97,7 +97,7 @@ def _build_system(now_str: str) -> str:
         "- domain: 只能是 work|study|life|health|social|leisure 之一\n"
         "- time: 中文时段 上午|中午|下午|晚上,或具体如\"8点半\";没有则 null\n"
         "- deadline: 今天|明天|后天|本周;没有则 null\n"
-        "- est: 预计时长,分钟整数\n"
+        "- est: 预计时长,分钟整数;用户没明说时长时,按任务类型合理估计(一般 15-120 分钟),**不要返回 0**\n"
         "- load: deep(>=90 分钟)|medium(>=40)|light\n"
         "- restorative: 布尔;domain 为 health/social/leisure 时为 true,否则 false\n"
         "- conf: 置信度数字(0-100)\n"
@@ -145,8 +145,21 @@ def real_parse(text: str):
     return []
 
 
+def _norm(it):
+    """把一条任务规整成前端友好、字段自洽的样子(模型偶发的边角问题在此兜底)。"""
+    est = it.get("est")
+    if not isinstance(est, int) or est <= 0:      # 模型没给/给了 0 → 默认 30 分钟,别显示"0分钟"
+        est = 30
+    it["est"] = est
+    it["load"] = "deep" if est >= 90 else "medium" if est >= 40 else "light"   # load 由 est 推(§7、与前端一致)
+    it["restorative"] = it.get("domain") in ("health", "social", "leisure")     # restorative 完全由 domain 决定
+    if not isinstance(it.get("conf"), (int, float)):
+        it["conf"] = 80
+    return it
+
+
 def validate(items):
-    """后端再校验一遍(§7 硬要求):字段齐 + domain 合法 + day 是整数;不合格的项丢弃。"""
+    """后端再校验一遍(§7 硬要求):字段齐 + domain 合法 + day 是整数;不合格的项丢弃,合格的规整。"""
     clean = []
     for it in items if isinstance(items, list) else []:
         if not isinstance(it, dict):
@@ -157,7 +170,7 @@ def validate(items):
             continue
         if not isinstance(it.get("day"), int):
             continue
-        clean.append(it)
+        clean.append(_norm(it))
     return clean
 
 
