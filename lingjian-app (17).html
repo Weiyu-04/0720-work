@@ -3514,12 +3514,21 @@ function openVoice(){
         <div class="wave" id="v-wave" style="visibility:hidden">${'<i></i>'.repeat(13)}</div>
         <div class="transcript" id="v-tr" style="margin-top:14px">${SR?'点话筒开始':'点话筒试试'}</div>
       </div>
+      <div class="type-row" style="display:flex;gap:8px;margin:14px 4px 2px">
+        <input id="v-text" type="text" autocomplete="off" placeholder="或直接打字，比如：明天上午写报告，晚上陪我妈散步半小时"
+          style="flex:1;min-width:0;padding:11px 14px;border:1px solid var(--line,#e6e0d6);border-radius:12px;font-size:14px;background:var(--card,#fff);color:inherit;outline:none">
+        <button class="btn btn--primary" id="v-send" style="padding:0 16px;white-space:nowrap">发送</button>
+      </div>
       <div id="v-result" style="margin-top:6px"></div>
     </div>
   </div>`, {full:true});
   ov.querySelector('#v-close').onclick=()=>closeOverlay(ov);
   ov.querySelector('#v-form').onclick=()=>{ closeOverlay(ov); openAdd(); };
   const mic=ov.querySelector('#v-mic'), wave=ov.querySelector('#v-wave'), tr=ov.querySelector('#v-tr'), res=ov.querySelector('#v-result'), tip=ov.querySelector('#v-tip');
+  const tin=ov.querySelector('#v-text'), tsend=ov.querySelector('#v-send');
+  function submitTyped(){ const v=(tin.value||'').trim(); if(!v) return; tin.blur(); tr.textContent=v; renderResult(v); }   // 打字输入走同一条链路(后端/本地兜底/徽章)
+  if(tsend) tsend.onclick=submitTyped;
+  if(tin) tin.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); submitTyped(); } };
   const demo='明天上午写完实验部分，晚上八点陪我妈散步半小时，这周得去趟医院';
   let rec=null, recording=false, finalText='';
 
