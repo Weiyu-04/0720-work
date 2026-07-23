@@ -3919,9 +3919,10 @@ function openConfide(){
       clearTimeout(timer);
       if(resp.ok){ const d=await resp.json(); if(d.crisis) isCrisis=true; else if(d.reply&&d.reply.trim()) botText=d.reply.trim(); }
     }catch(e){}
-    status.textContent='在线 · 先共情，不说教';
     if(isCrisis){ crisis(); return; }                              // 后端二次危机判定(双保险)
+    const online=!!botText;
     if(!botText) botText=BOT_REPLIES[ri++ % BOT_REPLIES.length];    // 后端不可达/空 → 本地兜底
+    status.textContent = online ? '在线 · AI 实时回复' : '离线 · 本地示例(后端未连上)';   // 在线/离线一眼可见
     add('bot', esc(botText).replace(/\n/g,'<br>'));
     history.push({role:'user',content:t},{role:'assistant',content:botText});
   };
