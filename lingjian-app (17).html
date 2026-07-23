@@ -2579,7 +2579,14 @@ function RenderHome(){
     ${hasRows?`
     <div class="tasklist" style="animation-delay:.22s">
       ${listHTML}
-    </div>`:active.length?`<div class="empty-note" style="margin-top:6px">这个筛选下没有任务 · 点上方还原</div>`:`
+    </div>`:active.length?`<div class="empty-note" style="margin-top:6px">这个筛选下没有任务 · 点上方还原</div>`:state.tasks.length===0?`
+    <div class="alldone" style="animation-delay:.22s">${icon('spark',24,2.4)}
+      <b>从这里开始你的第一件事</b><span>说一句话，我帮你切分、归类、排好先后 —— 也可以点下面的例子快速试试。</span>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;width:100%">
+        <button class="btn btn--primary btn--block" data-add>${icon('plus',16,2.2)} 说 / 打一句话，添加任务</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">${['明天上午写周报','今晚健身40分钟','周五前交材料'].map(x=>`<button class="btn btn--soft" data-seedadd="${x}">${x}</button>`).join('')}</div>
+      </div>
+    </div>`:`
     <div class="alldone" style="animation-delay:.22s">${icon('check',24,2.6)}
       <b>今天的清单清空了</b><span>${done.length?done.length+' 件全部完成 · ':''}给自己一点奖励，或者提前看看明天</span>
       <div><button class="btn btn--soft" data-nav="planner">${icon('cal',15,2)} 看看明天</button></div>
@@ -4683,13 +4690,15 @@ function openLogin(){
     <label class="login-agree"><span class="lchk" id="lg-chk"></span><span>我已阅读并同意 <b>《用户协议》</b> 与 <b>《隐私政策》</b></span></label>
   </div>`;
   const need=()=>{ if(!agreed){ toast('请先阅读并勾选同意协议','shield'); const c=box.querySelector('#lg-chk'); c.animate?c.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:300}):0; return false; } return true; };
-  const doLogin=via=>{ state.loggedIn=true; closeOverlay(ov); toast('登录成功 · '+via,'check'); setTimeout(openPermissions, 380); };
+  const doLogin=(via, isGuest)=>{ state.loggedIn=true; state.isGuest=!!isGuest;
+    if(!isGuest) state.tasks=[];   // L4-4:正式用户首页空白,自己添加;游客保留内置演示任务
+    closeOverlay(ov); toast('登录成功 · '+via,'check'); setTimeout(openPermissions, 380); };
   box.querySelector('#lg-chk').parentElement.onclick=e=>{ e.preventDefault(); agreed=!agreed; box.querySelector('#lg-chk').classList.toggle('on',agreed); };
   box.querySelector('#lg-getcode').onclick=()=>{ if(cooldown) return; const p=box.querySelector('#lg-phone').value.trim(); if(p.length<11){ toast('请输入 11 位手机号','phone'); return; } toast('验证码已发送（演示：1234）','send'); cooldown=60; const btn=box.querySelector('#lg-getcode'); btn.classList.add('off'); cdT=setInterval(()=>{ cooldown--; btn.textContent=cooldown+'s'; if(cooldown<=0){ clearInterval(cdT); btn.textContent='获取验证码'; btn.classList.remove('off'); } },1000); };
   box.querySelector('#lg-login').onclick=()=>{ if(!need()) return; if(box.querySelector('#lg-phone').value.trim().length<11){ toast('请输入手机号','phone'); return; } doLogin('手机验证码'); };
   box.querySelector('#lg-onetap').onclick=()=>{ if(!need()) return; doLogin('本机一键'); };
   box.querySelectorAll('[data-login]').forEach(b=>b.onclick=()=>{ if(!need()) return; doLogin(b.dataset.login); });
-  box.querySelector('#lg-guest').onclick=()=>{ if(!need()) return; state.membership='free'; doLogin('游客试用'); };
+  box.querySelector('#lg-guest').onclick=()=>{ if(!need()) return; state.membership='free'; doLogin('游客试用', true); };
 }
 
 /* ================= PERMISSIONS ================= */
@@ -4819,6 +4828,9 @@ function onClick(e){
   const q=sel=>e.target.closest(sel); let el;
   if(el=q('[data-nav]')) return go(el.dataset.nav);
   if(q('[data-add]')) return openAdd();
+  if(el=q('[data-seedadd]')){ const txt=el.dataset.seedadd, dom=guessDomain(txt);   // L4-4 空状态:示例一键入库
+    state.tasks.unshift({id:'u'+Date.now(), title:txt, domain:dom, load:'light', est:30, status:'pending', day:0, restorative:DOMAINS[dom].restorative});
+    toast('已添加 · '+txt,'check'); return RenderHome(); }
   if(q('[data-chainnew]')) return openChainBuilder();
   if(el=q('[data-qk]')) return quickAdd(+el.dataset.qk);
   if(q('[data-tplopen]')) return openTemplates();
