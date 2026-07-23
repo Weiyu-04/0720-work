@@ -445,3 +445,41 @@ def _report_real(rng, stats):
 def report(req: ReportReq):
     r = _report_real(req.range, req.stats) if _has_key() else None
     return r or {}
+
+
+# ---------------------------------------------------------------------------
+# L2-5 尾:心力温度计结果解读 /thermo(3 维自测分数 → AI 个性化解读;无 key/失败 → 前端保留预设)
+# ---------------------------------------------------------------------------
+class ThermoReq(BaseModel):
+    zone: str
+    scores: dict
+
+
+def _thermo_system() -> str:
+    return (
+        "你是「雷萌萌」,灵笺里治愈系的小陪伴。用户刚做完'心力温度计'自测,给你 3 个维度的百分比"
+        "(越高越糟:心理负荷/焦虑度/职业疲劳)和总体区间(green从容 / yellow略紧 / orange偏紧 / red需休息)。\n"
+        "根据这些数,写 1-2 句温柔、具体、不审判的状态解读:点出最突出的那个维度,给一句极轻的建议或安抚。"
+        "像朋友说话、不像医生。只输出这句话本身,不要 json、不要加引号。"
+    )
+
+
+def _thermo_real(zone, scores):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
+    payload = {"zone": zone, "scores": scores}
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": _thermo_system()},
+                      {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+            temperature=0.7, max_tokens=140)
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        print("thermo error:", e)
+        return ""
+
+
+@app.post("/thermo")
+def thermo(req: ThermoReq):
+    return {"text": _thermo_real(req.zone, req.scores) if _has_key() else ""}

@@ -3754,7 +3754,7 @@ function openThermo(auto=false){
           <div class="eyebrow center">此刻的心力</div>
           <div class="zonering" style="--zc:${Z.color};--zp:${pct}%"><div class="in"><b style="color:${Z.color}">${score}</b><span>${Z.tag} · ${Z.label}</span></div></div>
           <div class="threed">${sub.map(s=>`<div class="b"><div class="v" style="color:${Z.color}">${s.v}</div><div class="l">${s.k}</div></div>`).join('')}</div>
-          <p class="desc" style="text-align:center">${{green:'状态挺好，继续保持这个节奏就好。',yellow:'有点紧绷，但还稳。给自己留点缓冲，别硬撑。',orange:'已经轻度过载了。为了保护你的状态和创造力，我建议启动心力修复模式。',red:'你已经扛得太久。现在最重要的事，是停下来休息。'}[zone]}</p>
+          <p class="desc" id="thermo-desc" style="text-align:center">${{green:'状态挺好，继续保持这个节奏就好。',yellow:'有点紧绷，但还稳。给自己留点缓冲，别硬撑。',orange:'已经轻度过载了。为了保护你的状态和创造力，我建议启动心力修复模式。',red:'你已经扛得太久。现在最重要的事，是停下来休息。'}[zone]}</p>
           <div class="disclaim">${icon('shield',13,2)} 心力温度计是自我觉察工具，不构成任何医学诊断。</div>
           ${['orange','red'].includes(zone)
             ? `<button class="btn btn--primary btn--block" style="margin-top:14px" id="to-deload">看看怎么帮我减负</button><button class="btn btn--line btn--block" style="margin-top:8px" data-close>我再撑一下</button>`
@@ -3762,6 +3762,12 @@ function openThermo(auto=false){
         </div>`;
       sheet.querySelector('[data-close]')?.addEventListener('click',()=>{ closeOverlay(ov); go('home'); });
       sheet.querySelector('#to-deload')?.addEventListener('click',()=>{ closeOverlay(ov); openDeload(); });
+      (async()=>{ if(!sheet.querySelector('#thermo-desc')) return;   // L2-5:AI 个性化解读替换预设文案,失败保留
+        try{ const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),9000);
+          const resp=await fetch(LJ_API_BASE+'/thermo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zone, scores:{[sub[0].k]:sub[0].v,[sub[1].k]:sub[1].v,[sub[2].k]:sub[2].v}}),signal:ctrl.signal});
+          clearTimeout(timer); if(!resp.ok) return; const d=await resp.json(); const cur=sheet.querySelector('#thermo-desc');
+          if(d && d.text && d.text.trim() && cur) cur.textContent=d.text.trim();
+        }catch(e){} })();
     }
   }
   draw();
