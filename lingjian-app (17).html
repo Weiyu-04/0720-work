@@ -3876,7 +3876,7 @@ function openConfide(){
   const ov=openOverlay(`<div class="chatpage">
     <div class="cp-top">
       <button class="ab-btn" id="c-close">${icon('chevron',20,2.2)}</button>
-      <div class="cp-id"><div class="cp-av">${character('calm',state.accessory)}</div><div><b>雷萌萌</b><span id="c-status">在线 · 先共情，不说教</span></div></div>
+      <div class="cp-id"><div class="cp-av">${character('calm',state.accessory)}</div><div><b>雷萌萌</b><span id="c-status">连接中…</span></div></div>
       <button class="cp-voice on" id="c-voice" title="语音朗读">${icon('volume',18,2)}</button>
     </div>
     <div class="cp-chat" id="c-chat"></div>
@@ -3890,6 +3890,13 @@ function openConfide(){
   </div>`, {full:true});
   const chat=ov.querySelector('#c-chat'), input=ov.querySelector('#c-input'), voiceBtn=ov.querySelector('#c-voice'), micBtn=ov.querySelector('#c-mic'), status=ov.querySelector('#c-status');
   let ri=0, history=[];   // history:给后端 /chat 的上下文
+  (async()=>{ try{   // 打开即探测在线/离线,不用等发第一句
+    const c=new AbortController(); const tm=setTimeout(()=>c.abort(),6000);
+    const r=await fetch(LJ_API_BASE+'/health',{signal:c.signal}); clearTimeout(tm);
+    const d=r.ok?await r.json():null;
+    status.textContent = (d&&d.mode==='live') ? '在线 · AI 实时回复'
+                       : d ? '离线 · 后端未接 key(本地示例)' : '离线 · 后端未连上(本地示例)';
+  }catch(e){ status.textContent='离线 · 后端未连上(本地示例)'; } })();
   const scroll=()=>{ chat.scrollTop=chat.scrollHeight; };
   const add=(cls,html,speak)=>{ const d=document.createElement('div'); d.className='cmsg '+cls;
     if(cls==='bot'){ d.innerHTML=`<div class="cav">${character('happy',null)}</div><div class="cbub">${html}<button class="cspk">${icon('volume',13,2)}</button></div>`;
@@ -3922,7 +3929,7 @@ function openConfide(){
     if(isCrisis){ crisis(); return; }                              // 后端二次危机判定(双保险)
     const online=!!botText;
     if(!botText) botText=BOT_REPLIES[ri++ % BOT_REPLIES.length];    // 后端不可达/空 → 本地兜底
-    status.textContent = online ? '在线 · AI 实时回复' : '离线 · 本地示例(后端未连上)';   // 在线/离线一眼可见
+    status.textContent = online ? '在线 · AI 实时回复' : '离线 · 本地示例';   // 在线/离线一眼可见
     add('bot', esc(botText).replace(/\n/g,'<br>'));
     history.push({role:'user',content:t},{role:'assistant',content:botText});
   };
